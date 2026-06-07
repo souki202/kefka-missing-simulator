@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ミッシング - ギミックシミュレーター</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">ABSOLUTE KEFKA · PHASE 2</p>
+          <h1>ミッシング</h1>
+        </div>
+        <div class="status-strip">
+          <div><span>TIME</span><strong id="timeDisplay">0:00</strong></div>
+          <div><span>NEXT</span><strong id="nextDisplay">役割を選択</strong></div>
+          <div><span>HAZARD</span><strong id="stackDisplay">4</strong></div>
+        </div>
+      </header>
+
+      <section class="game-layout">
+        <div class="arena-panel">
+          <canvas id="arena" width="800" height="800" aria-label="ミッシングの戦闘フィールド"></canvas>
+          <div id="castBar" class="cast-bar hidden">
+            <span id="castName"></span>
+            <div><i id="castFill"></i></div>
+          </div>
+          <div id="banner" class="banner hidden"></div>
+        </div>
+
+        <aside class="side-panel">
+          <section class="card assignment-card">
+            <p class="card-label">YOUR ASSIGNMENT</p>
+            <div class="assignment-main">
+              <img id="roleIcon" src="assets/TankRole.png" alt="">
+              <div><strong id="roleName">未選択</strong><span id="pairName">PAIR —</span></div>
+              <b id="markBadge" class="mark-badge">—</b>
+            </div>
+            <div class="assignment-grid">
+              <div><span>組</span><strong id="groupName">—</strong></div>
+              <div><span>次の塔</span><strong id="towerAssignment">—</strong></div>
+            </div>
+          </section>
+
+          <section class="card timeline-card">
+            <div class="card-heading"><p class="card-label">TIMELINE</p><span id="roundDisplay">ROUND — / 8</span></div>
+            <ol id="timeline"></ol>
+          </section>
+
+          <section class="card controls-card">
+            <p class="card-label">CONTROLS</p>
+            <div class="key-row"><kbd>WASD</kbd><kbd>矢印</kbd><span>移動</span></div>
+            <div class="key-row"><kbd>SHIFT</kbd><span>スプリント</span></div>
+            <div class="key-row"><kbd>CLICK</kbd><span>クリック地点へ移動</span></div>
+            <label class="speed-control">進行速度
+              <select id="speedSelect">
+                <option value="1">1.0x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2.0x</option>
+              </select>
+            </label>
+          </section>
+        </aside>
+      </section>
+    </main>
+
+    <div id="roleModal" class="modal">
+      <div class="modal-card">
+        <p class="eyebrow">SELECT YOUR POSITION</p>
+        <h2>担当ロールを選択</h2>
+        <p class="modal-copy">残りの7人は自動で正解位置へ移動します。あなたの担当だけを操作してください。</p>
+        <div id="roleButtons" class="role-buttons"></div>
+        <div class="strategy-note">
+          <strong>KTりーん式 · 1238 / 4567</strong>
+          <span>同ロールペアで先組・後組を判断。相方に頭割りなら相方が先、どちらも頭割りなしなら左側の優先度が先。</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="resultModal" class="modal hidden">
+      <div class="modal-card result-card">
+        <p id="resultKicker" class="eyebrow">DUTY FAILED</p>
+        <h2 id="resultTitle">GAME OVER</h2>
+        <p id="resultReason" class="modal-copy"></p>
+        <button id="retryButton" class="primary-button">もう一度挑戦</button>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "gimmick-simulator",
+  "version": "1.0.0",
+  "description": "FF14 Missing mechanic simulator",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --check app.js && node --check server.js && node --check smoke-test.js",
+    "test:browser": "node smoke-test.js"
+  }
+}
