@@ -14,6 +14,8 @@ const UI = {
   selectionTitle: document.getElementById("selectionTitle"),
   selectionCopy: document.getElementById("selectionCopy"),
   strategyButtons: document.getElementById("strategyButtons"),
+  spreadSelection: document.getElementById("spreadSelection"),
+  spreadButtons: document.getElementById("spreadButtons"),
   roleSelection: document.getElementById("roleSelection"),
   roleButtons: document.getElementById("roleButtons"),
   strategyName: document.getElementById("strategyName"),
@@ -66,12 +68,22 @@ const PAIRS = [["MT", "ST"], ["H1", "H2"], ["D1", "D2"], ["D3", "D4"]];
 const YARN_PAIRS = [["MT", "H1"], ["ST", "H2"], ["D1", "D3"], ["D2", "D4"]];
 const STRATEGIES = {
   lean: {
-    name: "KTりーん式",
+    name: "りーん式",
     description: "同ロールペアで判断。自分が頭割りなら先組、相方なら後組、どちらにもなければロール優先度が高い方が先組。",
   },
   yarn: {
-    name: "KTヤーン式",
+    name: "ヤーン式",
     description: "MT-H1／ST-H2／D1-D3／D2-D4で判断。ペア内に頭割りがあれば2人とも先組、なければ2人とも後組。",
+  },
+};
+const SPREAD_METHODS = {
+  kt: {
+    name: "KT式",
+    description: "既存の散開位置。奇数回は左右の塔へ寄せ、偶数回は内側扇と外側円で処理します。",
+  },
+  piren: {
+    name: "ぴれん式",
+    description: "図を基準に、奇数回は塔周辺の縦配置、偶数回は左右対称の上下配置で処理します。",
   },
 };
 const GROUP_ROUNDS = { A: [1, 2, 3, 8], B: [4, 5, 6, 7] };
@@ -111,8 +123,10 @@ let state = {
   moveTarget: null,
   bannerUntil: 0,
   strategy: null,
+  spread: null,
 };
 let selectedStrategy = null;
+let selectedSpread = null;
 
 if (querySpeed > 0) {
   if (![...UI.speed.options].some((option) => Number(option.value) === querySpeed)) {
@@ -227,7 +241,7 @@ function setupRoleButtons() {
     const button = document.createElement("button");
     button.className = "role-button";
     button.innerHTML = `<img src="${role.icon}" alt=""><strong>${role.id}</strong>`;
-    button.addEventListener("click", () => startGame(role.id, selectedStrategy));
+    button.addEventListener("click", () => startGame(role.id, selectedStrategy, selectedSpread));
     UI.roleButtons.appendChild(button);
   }
 }
@@ -241,18 +255,43 @@ function selectStrategy(strategy) {
     button.setAttribute("aria-pressed", String(selected));
   }
   UI.selectionTitle.textContent = STRATEGIES[strategy].name;
-  UI.selectionCopy.textContent = "担当ロールを選択してください。組分け後の塔処理はどちらの方式も共通です。";
-  UI.strategyName.textContent = `${STRATEGIES[strategy].name} · 1238 / 4567`;
-  UI.strategyDescription.textContent = STRATEGIES[strategy].description;
+  UI.selectionCopy.textContent = "次に、塔処理時の散開位置を選択してください。";
+  selectedSpread = null;
+  for (const button of UI.spreadButtons.querySelectorAll(".spread-button")) {
+    button.classList.remove("selected");
+    button.setAttribute("aria-pressed", "false");
+  }
+  UI.spreadSelection.classList.remove("hidden");
+  UI.roleSelection.classList.add("hidden");
+}
+
+function selectSpread(spread) {
+  if (!selectedStrategy || !SPREAD_METHODS[spread]) return;
+  selectedSpread = spread;
+  for (const button of UI.spreadButtons.querySelectorAll(".spread-button")) {
+    const selected = button.dataset.spread === spread;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  }
+  UI.selectionTitle.textContent = "担当ロールを選択";
+  UI.selectionCopy.textContent = "残りの7人は自動で正解位置へ移動します。あなたの担当だけを操作してください。";
+  UI.strategyName.textContent = `${STRATEGIES[selectedStrategy].name} / ${SPREAD_METHODS[spread].name} · 1238 / 4567`;
+  UI.strategyDescription.textContent = `${STRATEGIES[selectedStrategy].description} ${SPREAD_METHODS[spread].description}`;
   UI.roleSelection.classList.remove("hidden");
 }
 
 function resetSelection() {
   selectedStrategy = null;
+  selectedSpread = null;
   UI.selectionTitle.textContent = "攻略法を選択";
-  UI.selectionCopy.textContent = "最初の先組・後組の決め方を選択してください。組分け後の塔処理は共通です。";
+  UI.selectionCopy.textContent = "最初の先組・後組の決め方を選択してください。";
+  UI.spreadSelection.classList.add("hidden");
   UI.roleSelection.classList.add("hidden");
   for (const button of UI.strategyButtons.querySelectorAll(".strategy-button")) {
+    button.classList.remove("selected");
+    button.setAttribute("aria-pressed", "false");
+  }
+  for (const button of UI.spreadButtons.querySelectorAll(".spread-button")) {
     button.classList.remove("selected");
     button.setAttribute("aria-pressed", "false");
   }
@@ -264,8 +303,9 @@ function pairIdFor(playerId, strategy) {
   return pair?.find((id) => id !== playerId) || "—";
 }
 
-function startGame(playerId, strategy = "lean") {
+function startGame(playerId, strategy = "lean", spread = "kt") {
   const activeStrategy = STRATEGIES[strategy] ? strategy : "lean";
+  const activeSpread = SPREAD_METHODS[spread] ? spread : "kt";
   state = {
     running: true,
     finished: false,
@@ -287,6 +327,7 @@ function startGame(playerId, strategy = "lean") {
     moveTarget: null,
     bannerUntil: 0,
     strategy: activeStrategy,
+    spread: activeSpread,
   };
   const player = getPlayer();
   player.x = 400;
@@ -325,7 +366,7 @@ function markSide(player, round) {
   return peers.indexOf(player);
 }
 
-function assignmentFor(player, round) {
+function ktAssignmentFor(player, round) {
   const info = towerInfo(round);
   if (player.group !== info.group) return null;
   const mark = markForRound(player, round);
@@ -360,8 +401,53 @@ function assignmentFor(player, round) {
     : { tower: 1, x: 515, y: 555, name: "塔2・外側円" };
 }
 
-function supportPosition(player, round) {
+function pirenAssignmentFor(player, round) {
   const info = towerInfo(round);
+  if (player.group !== info.group) return null;
+  const mark = markForRound(player, round);
+  if (info.odd) {
+    if (mark === "fan") return { tower: 0, x: 300, y: 560, name: "塔1・左誘導扇" };
+    if (mark === "circle") return { tower: 1, x: 500, y: 560, name: "塔2・下円" };
+    return markSide(player, round) === 0
+      ? { tower: 0, x: 300, y: 485, name: "塔1・縦頭割り" }
+      : { tower: 1, x: 500, y: 450, name: "塔2・縦頭割り" };
+  }
+  const side = markSide(player, round);
+  if (mark === "fan") {
+    return side === 0
+      ? { tower: 0, x: 300, y: 450, name: "塔1・上扇" }
+      : { tower: 1, x: 500, y: 450, name: "塔2・上扇" };
+  }
+  return side === 0
+    ? { tower: 0, x: 300, y: 565, name: "塔1・下円" }
+    : { tower: 1, x: 500, y: 565, name: "塔2・下円" };
+}
+
+function assignmentFor(player, round, spread = state.spread || "kt") {
+  return spread === "piren"
+    ? pirenAssignmentFor(player, round)
+    : ktAssignmentFor(player, round);
+}
+
+function supportPosition(player, round, spread = state.spread || "kt") {
+  const info = towerInfo(round);
+  if (spread === "piren") {
+    const positions = info.odd
+      ? {
+          tank: [320, 430],
+          healer: [300, 580],
+          melee: [450, 420],
+          ranged: [455, 415],
+        }
+      : {
+          tank: [320, 320],
+          healer: [215, 505],
+          melee: [480, 320],
+          ranged: [585, 505],
+        };
+    const [x, y] = positions[player.role.category];
+    return { x, y };
+  }
   if (!info.odd) {
     const positions = {
       tank: [330, 285],
@@ -1109,15 +1195,23 @@ canvas.addEventListener("pointerdown", (event) => {
   };
 });
 UI.retry.addEventListener("click", () => {
-  startGame(state.playerId, state.strategy);
+  startGame(state.playerId, state.strategy, state.spread);
 });
 
 UI.strategyButtons.addEventListener("click", (event) => {
   const button = event.target.closest(".strategy-button");
   if (button) selectStrategy(button.dataset.strategy);
 });
+UI.spreadButtons.addEventListener("click", (event) => {
+  const button = event.target.closest(".spread-button");
+  if (button) selectSpread(button.dataset.spread);
+});
 setupRoleButtons();
 setupTimeline();
 resetSelection();
 drawArena();
-if (autoplay) startGame(query.get("role") || "MT", query.get("strategy") || "lean");
+if (autoplay) startGame(
+  query.get("role") || "MT",
+  query.get("strategy") || "lean",
+  query.get("spread") || query.get("position") || "kt"
+);

@@ -12,6 +12,7 @@ if (!chrome) throw new Error("Google Chrome was not found.");
 
 const port = 9333;
 const simulationStrategy = process.env.SMOKE_STRATEGY || "lean";
+const simulationSpread = process.env.SMOKE_SPREAD || "kt";
 const profile = path.join(os.tmpdir(), `gimmick-smoke-${Date.now()}`);
 const browser = spawn(chrome, [
   "--headless=new",
@@ -80,7 +81,7 @@ async function run() {
     mobile: false,
   });
   await send("Page.navigate", {
-    url: `http://127.0.0.1:4173/?autoplay=1&speed=20&role=MT&strategy=${simulationStrategy}`,
+    url: `http://127.0.0.1:4173/?autoplay=1&speed=20&role=MT&strategy=${simulationStrategy}&spread=${simulationSpread}`,
   });
   await sleep(250);
   const layoutResult = await send("Runtime.evaluate", {
@@ -184,19 +185,82 @@ async function run() {
   if (!distribution.ok) {
     throw new Error(`Invalid spell hazard distribution: ${JSON.stringify(distribution)}`);
   }
+  const placementResult = await send("Runtime.evaluate", {
+    expression: `JSON.stringify((() => {
+      const original = {
+        players: state.players,
+        spread: state.spread,
+        spellEffects: state.spellEffects,
+        time: state.time,
+      };
+      for (const spread of ["kt", "piren"]) {
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          const strategy = attempt % 2 ? "yarn" : "lean";
+          state.players = createPlayers(strategy);
+          state.spread = spread;
+          for (let round = 1; round <= 8; round += 1) {
+            state.time = TOWER_TIMES[round - 1];
+            state.spellEffects = [];
+            for (const player of state.players) {
+              player.mark = markForRound(player, round);
+              const position = assignmentPositionFor(player, round);
+              player.x = position.x;
+              player.y = position.y;
+            }
+            const occupied = TOWERS.map((tower) =>
+              state.players.filter((member) => distance(member, tower) <= tower.r).length
+            );
+            if (occupied.some((count) => count !== 2)) {
+              return { ok: false, reason: "tower count", spread, strategy, round, occupied };
+            }
+            const info = towerInfo(round);
+            const active = state.players.filter((member) => member.group === info.group);
+            const effects = createSpellEffects(active, round);
+            const hazard = spellHazardFailure(effects, round);
+            if (hazard) {
+              return { ok: false, reason: "hazard", spread, strategy, round, hazard };
+            }
+            if (round % 2 === 0) {
+              const aoe = pastFutureAoeFailure(round);
+              if (aoe) return { ok: false, reason: "pastFuture", spread, strategy, round, aoe };
+            }
+          }
+        }
+      }
+      state.players = original.players;
+      state.spread = original.spread;
+      state.spellEffects = original.spellEffects;
+      state.time = original.time;
+      return { ok: true };
+    })())`,
+    returnByValue: true,
+  });
+  const placement = JSON.parse(placementResult.result.value);
+  if (!placement.ok) {
+    throw new Error(`Invalid spread placement: ${JSON.stringify(placement)}`);
+  }
   const selectionResult = await send("Runtime.evaluate", {
     expression: `JSON.stringify((() => {
       resetSelection();
       const before = UI.roleSelection.classList.contains("hidden");
+      const spreadBefore = UI.spreadSelection.classList.contains("hidden");
       selectStrategy("yarn");
-      const after = UI.roleSelection.classList.contains("hidden");
+      const afterStrategy = UI.roleSelection.classList.contains("hidden");
+      const spreadAfterStrategy = UI.spreadSelection.classList.contains("hidden");
+      selectSpread("piren");
+      const afterSpread = UI.roleSelection.classList.contains("hidden");
       const pair = pairIdFor("MT", "yarn");
       return {
-        ok: before && !after && selectedStrategy === "yarn" && pair === "H1" &&
-          UI.strategyName.textContent.includes("ヤーン式"),
+        ok: before && spreadBefore && afterStrategy && !spreadAfterStrategy && !afterSpread &&
+          selectedStrategy === "yarn" && selectedSpread === "piren" && pair === "H1" &&
+          UI.strategyName.textContent.includes("ヤーン式") && UI.strategyName.textContent.includes("ぴれん式"),
         before,
-        after,
+        spreadBefore,
+        afterStrategy,
+        spreadAfterStrategy,
+        afterSpread,
         selectedStrategy,
+        selectedSpread,
         pair,
       };
     })())`,
@@ -405,21 +469,23 @@ async function run() {
       reason: document.getElementById("resultReason").textContent,
       time: document.getElementById("timeDisplay").textContent,
       player: { id: getPlayer().id, group: getPlayer().group, x: getPlayer().x, y: getPlayer().y },
-      strategy: state.strategy
+      strategy: state.strategy,
+      spread: state.spread
     })`,
     returnByValue: true,
   });
   const status = JSON.parse(result.result.value);
 
   if (exceptions.length) throw new Error(`Browser exceptions: ${exceptions.join(", ")}`);
-  if (status.hidden || status.title !== "ミッシング突破" || status.strategy !== simulationStrategy) {
+  if (status.hidden || status.title !== "ミッシング突破" ||
+      status.strategy !== simulationStrategy || status.spread !== simulationSpread) {
     throw new Error(`Simulation did not clear: ${JSON.stringify(status)}`);
   }
 
   await send("Page.navigate", { url: "http://127.0.0.1:4173/?speed=20" });
   await sleep(300);
   await send("Runtime.evaluate", {
-    expression: `selectStrategy("lean"); document.querySelector(".role-button").click()`,
+    expression: `selectStrategy("lean"); selectSpread("kt"); document.querySelector(".role-button").click()`,
   });
   await sleep(1500);
   const failureResult = await send("Runtime.evaluate", {
@@ -442,6 +508,7 @@ async function run() {
       running: state.running,
       playerId: state.playerId,
       strategy: state.strategy,
+      spread: state.spread,
       roleModalHidden: document.getElementById("roleModal").classList.contains("hidden"),
       resultModalHidden: document.getElementById("resultModal").classList.contains("hidden")
     })`,
@@ -450,12 +517,13 @@ async function run() {
   const retryStatus = JSON.parse(retryResult.result.value);
   socket.close();
   if (!retryStatus.running || retryStatus.playerId !== "MT" || retryStatus.strategy !== "lean" ||
+      retryStatus.spread !== "kt" ||
       !retryStatus.roleModalHidden || !retryStatus.resultModalHidden) {
     throw new Error(`Retry did not preserve the selection: ${JSON.stringify(retryStatus)}`);
   }
   console.log(`Browser smoke test passed at ${status.time}: ${status.reason}`);
   console.log(`Failure check passed: ${failureStatus.reason}`);
-  console.log(`Retry check passed: ${retryStatus.playerId} / ${retryStatus.strategy}`);
+  console.log(`Retry check passed: ${retryStatus.playerId} / ${retryStatus.strategy} / ${retryStatus.spread}`);
 }
 
 run()
