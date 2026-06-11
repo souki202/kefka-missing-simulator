@@ -160,7 +160,7 @@ const SPREAD_METHODS = {
         fan: [{ tower: 0, x: 300, y: 560, name: "塔1・左誘導扇" }],
         circle: [{ tower: 1, x: 500, y: 560, name: "塔2・下円" }],
         share: [
-          { tower: 0, x: 300, y: 485, name: "塔1・縦頭割り" },
+          { tower: 0, x: 300, y: 500, name: "塔1・縦頭割り" },
           { tower: 1, x: 487, y: 443, name: "塔2・縦頭割り" },
         ],
       },
@@ -178,14 +178,14 @@ const SPREAD_METHODS = {
     support: {
       odd: {
         tank: { x: 320, y: 430 },
-        healer: { x: 300, y: 580 },
+        healer: { x: 300, y: 600 },
         melee: { x: 450, y: 420 },
         ranged: { x: 455, y: 415 },
       },
       even: {
-        tank: { x: 400, y: 175 },
+        tank: { x: 320, y: 320 },
         healer: { x: 225, y: 400 },
-        melee: { x: 400, y: 282 },
+        melee: { x: 480, y: 320 },
         ranged: { x: 575, y: 400 },
       },
     },
