@@ -253,34 +253,67 @@ async function run() {
       const modalCard = UI.roleModal.querySelector(".modal-card");
       const fitsViewport = () => {
         const rect = modalCard.getBoundingClientRect();
-        return rect.top >= 0 && rect.bottom <= window.innerHeight &&
-          modalCard.scrollHeight <= modalCard.clientHeight;
+        return rect.top >= 0 && rect.bottom <= window.innerHeight;
       };
       const before = UI.roleSelection.classList.contains("hidden");
       const spreadBefore = UI.spreadSelection.classList.contains("hidden");
+      const strategyBefore = UI.strategyButtons.classList.contains("hidden");
       const strategyFits = fitsViewport();
+      const initialHeight = modalCard.getBoundingClientRect().height;
       selectStrategy("yarn");
       const afterStrategy = UI.roleSelection.classList.contains("hidden");
       const spreadAfterStrategy = UI.spreadSelection.classList.contains("hidden");
+      const strategyAfterStrategy = UI.strategyButtons.classList.contains("hidden");
       const spreadFits = fitsViewport();
+      const spreadHeight = modalCard.getBoundingClientRect().height;
       selectSpread("piren");
       const afterSpread = UI.roleSelection.classList.contains("hidden");
+      const spreadAfterSpread = UI.spreadSelection.classList.contains("hidden");
+      const strategyAfterSpread = UI.strategyButtons.classList.contains("hidden");
       const roleFits = fitsViewport();
+      const roleHeight = modalCard.getBoundingClientRect().height;
+      const initialHeightFitsContent = initialHeight < window.innerHeight - 24;
+      const heightGrowsWithContent = spreadHeight > initialHeight && roleHeight >= spreadHeight;
+      const roleHeightUsesAvailableSpace =
+        Math.abs(roleHeight - (window.innerHeight - 24)) <= 1;
+      const scrollable = modalCard.scrollHeight > modalCard.clientHeight &&
+        getComputedStyle(modalCard).overflowY === "auto";
+      modalCard.scrollTop = modalCard.scrollHeight;
+      const roleButtons = UI.roleButtons.querySelectorAll(".role-button");
+      const lastRoleRect = roleButtons[roleButtons.length - 1].getBoundingClientRect();
+      const modalRect = modalCard.getBoundingClientRect();
+      const lastRoleReachable = lastRoleRect.top >= modalRect.top && lastRoleRect.bottom <= modalRect.bottom;
+      modalCard.scrollTop = 0;
       const pair = pairIdFor("MT", "yarn");
       UI.roleModal.classList.toggle("hidden", modalWasHidden);
       return {
-        ok: before && spreadBefore && afterStrategy && !spreadAfterStrategy && !afterSpread &&
+        ok: before && spreadBefore && !strategyBefore &&
+          afterStrategy && !spreadAfterStrategy && !strategyAfterStrategy &&
+          !afterSpread && !spreadAfterSpread && !strategyAfterSpread &&
           selectedStrategy === "yarn" && selectedSpread === "piren" && pair === "H1" &&
           UI.strategyName.textContent.includes("ヤーン/DN式") && UI.strategyName.textContent.includes("ぴれん式") &&
-          strategyFits && spreadFits && roleFits,
+          strategyFits && spreadFits && roleFits && initialHeightFitsContent &&
+          heightGrowsWithContent && roleHeightUsesAvailableSpace && scrollable && lastRoleReachable,
         before,
         spreadBefore,
+        strategyBefore,
         afterStrategy,
         spreadAfterStrategy,
+        strategyAfterStrategy,
         afterSpread,
+        spreadAfterSpread,
+        strategyAfterSpread,
         strategyFits,
         spreadFits,
         roleFits,
+        initialHeight,
+        spreadHeight,
+        roleHeight,
+        initialHeightFitsContent,
+        heightGrowsWithContent,
+        roleHeightUsesAvailableSpace,
+        scrollable,
+        lastRoleReachable,
         selectedStrategy,
         selectedSpread,
         pair,

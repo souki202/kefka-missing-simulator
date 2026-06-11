@@ -418,8 +418,6 @@ function selectStrategy(strategy) {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   }
-  UI.selectionTitle.textContent = "散開位置を選択";
-  UI.strategyButtons.classList.add("hidden");
   selectedSpread = null;
   for (const button of UI.spreadButtons.querySelectorAll(".spread-button")) {
     button.classList.remove("selected");
@@ -437,9 +435,7 @@ function selectSpread(spread) {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   }
-  UI.selectionTitle.textContent = "担当ロールを選択";
   UI.strategyName.textContent = `${STRATEGIES[selectedStrategy].name} / ${SPREAD_METHODS[spread].name} · 1238 / 4567`;
-  UI.spreadSelection.classList.add("hidden");
   UI.roleSelection.classList.remove("hidden");
 }
 
