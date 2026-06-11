@@ -13,6 +13,7 @@ if (!chrome) throw new Error("Google Chrome was not found.");
 const port = 9333;
 const simulationStrategy = process.env.SMOKE_STRATEGY || "lean";
 const simulationSpread = process.env.SMOKE_SPREAD || "kt";
+const simulationTowerPriority = process.env.SMOKE_TOWER_PRIORITY || "supportFirst";
 const profile = path.join(os.tmpdir(), `gimmick-smoke-${Date.now()}`);
 const browser = spawn(chrome, [
   "--headless=new",
@@ -81,7 +82,7 @@ async function run() {
     mobile: false,
   });
   await send("Page.navigate", {
-    url: `http://127.0.0.1:4173/?autoplay=1&speed=20&role=MT&strategy=${simulationStrategy}&spread=${simulationSpread}`,
+    url: `http://127.0.0.1:4173/?autoplay=1&speed=20&role=MT&strategy=${simulationStrategy}&spread=${simulationSpread}&towerPriority=${simulationTowerPriority}`,
   });
   await sleep(250);
   const layoutResult = await send("Runtime.evaluate", {
@@ -185,11 +186,65 @@ async function run() {
   if (!distribution.ok) {
     throw new Error(`Invalid spell hazard distribution: ${JSON.stringify(distribution)}`);
   }
+  const towerPriorityResult = await send("Runtime.evaluate", {
+    expression: `JSON.stringify((() => {
+      const original = {
+        players: state.players,
+        spread: state.spread,
+        towerPriority: state.towerPriority,
+      };
+      const makePlayer = (id, marks, lastTower, lastBossDistance) => ({
+        id,
+        role: roleById(id),
+        group: "A",
+        marks,
+        lastTower,
+        lastBossDistance,
+      });
+      state.spread = "kt";
+      state.towerPriority = "keepPrevious";
+      state.players = [
+        makePlayer("H1", { 1: "fan", 2: "fan" }, 0, 120),
+        makePlayer("MT", { 1: "circle", 2: "fan" }, 1, 80),
+        makePlayer("D1", { 1: "share", 2: "circle" }, 0, 90),
+        makePlayer("D3", { 1: "share", 2: "circle" }, 1, 110),
+      ];
+      const preserved = Object.fromEntries(
+        state.players.map((player) => [player.id, assignmentFor(player, 2).tower])
+      );
+      state.players[1].lastTower = 0;
+      const overlapResolved = Object.fromEntries(
+        state.players.map((player) => [player.id, assignmentFor(player, 2).tower])
+      );
+      const spreadOverrides = {
+        fan: assignmentFor(state.players[0], 1).tower,
+        circle: assignmentFor(state.players[1], 1).tower,
+      };
+      state.players = original.players;
+      state.spread = original.spread;
+      state.towerPriority = original.towerPriority;
+      return {
+        ok: preserved.H1 === 0 && preserved.MT === 1 &&
+          preserved.D1 === 0 && preserved.D3 === 1 &&
+          overlapResolved.H1 === 1 && overlapResolved.MT === 0 &&
+          spreadOverrides.fan === 0 && spreadOverrides.circle === 1,
+        preserved,
+        overlapResolved,
+        spreadOverrides,
+      };
+    })())`,
+    returnByValue: true,
+  });
+  const towerPriority = JSON.parse(towerPriorityResult.result.value);
+  if (!towerPriority.ok) {
+    throw new Error(`Invalid tower priority handling: ${JSON.stringify(towerPriority)}`);
+  }
   const placementResult = await send("Runtime.evaluate", {
     expression: `JSON.stringify((() => {
       const original = {
         players: state.players,
         spread: state.spread,
+        towerPriority: state.towerPriority,
         spellEffects: state.spellEffects,
         time: state.time,
       };
@@ -198,6 +253,7 @@ async function run() {
           const strategy = attempt % 2 ? "yarn" : "lean";
           state.players = createPlayers(strategy);
           state.spread = spread;
+          state.towerPriority = "supportFirst";
           for (let round = 1; round <= 8; round += 1) {
             state.time = TOWER_TIMES[round - 1];
             state.spellEffects = [];
@@ -229,6 +285,7 @@ async function run() {
       }
       state.players = original.players;
       state.spread = original.spread;
+      state.towerPriority = original.towerPriority;
       state.spellEffects = original.spellEffects;
       state.time = original.time;
       return { ok: true };
@@ -257,23 +314,32 @@ async function run() {
       };
       const before = UI.roleSelection.classList.contains("hidden");
       const spreadBefore = UI.spreadSelection.classList.contains("hidden");
+      const towerPriorityBefore = UI.towerPrioritySelection.classList.contains("hidden");
       const strategyBefore = UI.strategyButtons.classList.contains("hidden");
       const strategyFits = fitsViewport();
       const initialHeight = modalCard.getBoundingClientRect().height;
       selectStrategy("yarn");
       const afterStrategy = UI.roleSelection.classList.contains("hidden");
       const spreadAfterStrategy = UI.spreadSelection.classList.contains("hidden");
+      const towerPriorityAfterStrategy = UI.towerPrioritySelection.classList.contains("hidden");
       const strategyAfterStrategy = UI.strategyButtons.classList.contains("hidden");
       const spreadFits = fitsViewport();
       const spreadHeight = modalCard.getBoundingClientRect().height;
       selectSpread("piren");
       const afterSpread = UI.roleSelection.classList.contains("hidden");
       const spreadAfterSpread = UI.spreadSelection.classList.contains("hidden");
+      const towerPriorityAfterSpread = UI.towerPrioritySelection.classList.contains("hidden");
       const strategyAfterSpread = UI.strategyButtons.classList.contains("hidden");
+      const towerPriorityFits = fitsViewport();
+      const towerPriorityHeight = modalCard.getBoundingClientRect().height;
+      selectTowerPriority("keepPrevious");
+      const afterTowerPriority = UI.roleSelection.classList.contains("hidden");
+      const towerPriorityAfterSelection = UI.towerPrioritySelection.classList.contains("hidden");
       const roleFits = fitsViewport();
       const roleHeight = modalCard.getBoundingClientRect().height;
       const initialHeightFitsContent = initialHeight < window.innerHeight - 24;
-      const heightGrowsWithContent = spreadHeight > initialHeight && roleHeight >= spreadHeight;
+      const heightGrowsWithContent = spreadHeight > initialHeight &&
+        towerPriorityHeight >= spreadHeight && roleHeight >= towerPriorityHeight;
       const roleHeightUsesAvailableSpace =
         Math.abs(roleHeight - (window.innerHeight - 24)) <= 1;
       const scrollable = modalCard.scrollHeight > modalCard.clientHeight &&
@@ -287,27 +353,38 @@ async function run() {
       const pair = pairIdFor("MT", "yarn");
       UI.roleModal.classList.toggle("hidden", modalWasHidden);
       return {
-        ok: before && spreadBefore && !strategyBefore &&
-          afterStrategy && !spreadAfterStrategy && !strategyAfterStrategy &&
-          !afterSpread && !spreadAfterSpread && !strategyAfterSpread &&
-          selectedStrategy === "yarn" && selectedSpread === "piren" && pair === "H1" &&
-          UI.strategyName.textContent.includes("ヤーン/DN式") && UI.strategyName.textContent.includes("ぴれん式") &&
-          strategyFits && spreadFits && roleFits && initialHeightFitsContent &&
+        ok: before && spreadBefore && towerPriorityBefore && !strategyBefore &&
+          afterStrategy && !spreadAfterStrategy && towerPriorityAfterStrategy && !strategyAfterStrategy &&
+          afterSpread && !spreadAfterSpread && !towerPriorityAfterSpread && !strategyAfterSpread &&
+          !afterTowerPriority && !towerPriorityAfterSelection &&
+          selectedStrategy === "yarn" && selectedSpread === "piren" &&
+          selectedTowerPriority === "keepPrevious" && pair === "H1" &&
+          UI.strategyName.textContent.includes("ヤーン/DN式") &&
+          UI.strategyName.textContent.includes("ぴれん式") &&
+          UI.strategyName.textContent.includes("前回塔維持") &&
+          strategyFits && spreadFits && towerPriorityFits && roleFits && initialHeightFitsContent &&
           heightGrowsWithContent && roleHeightUsesAvailableSpace && scrollable && lastRoleReachable,
         before,
         spreadBefore,
+        towerPriorityBefore,
         strategyBefore,
         afterStrategy,
         spreadAfterStrategy,
+        towerPriorityAfterStrategy,
         strategyAfterStrategy,
         afterSpread,
         spreadAfterSpread,
+        towerPriorityAfterSpread,
         strategyAfterSpread,
+        afterTowerPriority,
+        towerPriorityAfterSelection,
         strategyFits,
         spreadFits,
+        towerPriorityFits,
         roleFits,
         initialHeight,
         spreadHeight,
+        towerPriorityHeight,
         roleHeight,
         initialHeightFitsContent,
         heightGrowsWithContent,
@@ -316,6 +393,7 @@ async function run() {
         lastRoleReachable,
         selectedStrategy,
         selectedSpread,
+        selectedTowerPriority,
         pair,
       };
     })())`,
@@ -531,7 +609,8 @@ async function run() {
       time: document.getElementById("timeDisplay").textContent,
       player: { id: getPlayer().id, group: getPlayer().group, x: getPlayer().x, y: getPlayer().y },
       strategy: state.strategy,
-      spread: state.spread
+      spread: state.spread,
+      towerPriority: state.towerPriority
     })`,
     returnByValue: true,
   });
@@ -539,14 +618,15 @@ async function run() {
 
   if (exceptions.length) throw new Error(`Browser exceptions: ${exceptions.join(", ")}`);
   if (status.hidden || status.title !== "ミッシング突破" ||
-      status.strategy !== simulationStrategy || status.spread !== simulationSpread) {
+      status.strategy !== simulationStrategy || status.spread !== simulationSpread ||
+      status.towerPriority !== simulationTowerPriority) {
     throw new Error(`Simulation did not clear: ${JSON.stringify(status)}`);
   }
 
   await send("Page.navigate", { url: "http://127.0.0.1:4173/?speed=20" });
   await sleep(300);
   await send("Runtime.evaluate", {
-    expression: `selectStrategy("lean"); selectSpread("kt"); document.querySelector(".role-button").click()`,
+    expression: `selectStrategy("lean"); selectSpread("kt"); selectTowerPriority("keepPrevious"); document.querySelector(".role-button").click()`,
   });
   await sleep(1500);
   const failureResult = await send("Runtime.evaluate", {
@@ -570,6 +650,7 @@ async function run() {
       playerId: state.playerId,
       strategy: state.strategy,
       spread: state.spread,
+      towerPriority: state.towerPriority,
       roleModalHidden: document.getElementById("roleModal").classList.contains("hidden"),
       resultModalHidden: document.getElementById("resultModal").classList.contains("hidden")
     })`,
@@ -578,13 +659,16 @@ async function run() {
   const retryStatus = JSON.parse(retryResult.result.value);
   socket.close();
   if (!retryStatus.running || retryStatus.playerId !== "MT" || retryStatus.strategy !== "lean" ||
-      retryStatus.spread !== "kt" ||
+      retryStatus.spread !== "kt" || retryStatus.towerPriority !== "keepPrevious" ||
       !retryStatus.roleModalHidden || !retryStatus.resultModalHidden) {
     throw new Error(`Retry did not preserve the selection: ${JSON.stringify(retryStatus)}`);
   }
   console.log(`Browser smoke test passed at ${status.time}: ${status.reason}`);
   console.log(`Failure check passed: ${failureStatus.reason}`);
-  console.log(`Retry check passed: ${retryStatus.playerId} / ${retryStatus.strategy} / ${retryStatus.spread}`);
+  console.log(
+    `Retry check passed: ${retryStatus.playerId} / ${retryStatus.strategy} / ` +
+    `${retryStatus.spread} / ${retryStatus.towerPriority}`
+  );
 }
 
 run()

@@ -15,6 +15,8 @@ const UI = {
   strategyButtons: document.getElementById("strategyButtons"),
   spreadSelection: document.getElementById("spreadSelection"),
   spreadButtons: document.getElementById("spreadButtons"),
+  towerPrioritySelection: document.getElementById("towerPrioritySelection"),
+  towerPriorityButtons: document.getElementById("towerPriorityButtons"),
   roleSelection: document.getElementById("roleSelection"),
   roleButtons: document.getElementById("roleButtons"),
   strategyName: document.getElementById("strategyName"),
@@ -76,7 +78,15 @@ const INITIAL_PRIORITY_METHODS = {
 };
 const TOWER_SIDE_PRIORITY_METHODS = {
   supportFirst: {
+    name: "左塔 HT近遠 右塔",
+    mode: "role-priority",
     // 同じマーカーが2人いる回は、先にあるロールが塔1側、後が塔2側。
+    categories: ["healer", "tank", "melee", "ranged"],
+  },
+  keepPrevious: {
+    name: "前回塔維持（被りは遠い側が移動）",
+    mode: "keep-previous",
+    // 前回と同じ塔を優先し、重複時はボスから遠い側が反対へ移る。
     categories: ["healer", "tank", "melee", "ranged"],
   },
 };
@@ -84,12 +94,10 @@ const STRATEGIES = {
   lean: {
     name: "りーん式",
     initialPriority: "lean",
-    towerSidePriority: "supportFirst",
   },
   yarn: {
     name: "ヤーン/DN式",
     initialPriority: "yarn",
-    towerSidePriority: "supportFirst",
   },
 };
 
@@ -273,9 +281,11 @@ let state = {
   bannerUntil: 0,
   strategy: null,
   spread: null,
+  towerPriority: null,
 };
 let selectedStrategy = null;
 let selectedSpread = null;
+let selectedTowerPriority = null;
 
 if (querySpeed > 0) {
   if (![...UI.speed.options].some((option) => Number(option.value) === querySpeed)) {
@@ -324,9 +334,8 @@ function initialPriorityForStrategy(strategy) {
   return INITIAL_PRIORITY_METHODS[method];
 }
 
-function towerSidePriorityForStrategy(strategy) {
-  const method = strategyConfig(strategy).towerSidePriority;
-  return TOWER_SIDE_PRIORITY_METHODS[method];
+function towerSidePriority(method) {
+  return TOWER_SIDE_PRIORITY_METHODS[method] || TOWER_SIDE_PRIORITY_METHODS.supportFirst;
 }
 
 function buildGroups(openingMarks, strategy = "lean") {
@@ -380,6 +389,8 @@ function createPlayers(strategy = "lean") {
       targetY: 640,
       stacks: 4,
       lastSoaked: 0,
+      lastTower: null,
+      lastBossDistance: null,
       marks: { [firstRound]: openingMarks[role.id] },
       mark: openingMarks[role.id],
       markUpdatedAt: 0,
@@ -405,7 +416,9 @@ function setupRoleButtons() {
     const button = document.createElement("button");
     button.className = "role-button";
     button.innerHTML = `<img src="${role.icon}" alt=""><strong>${role.id}</strong>`;
-    button.addEventListener("click", () => startGame(role.id, selectedStrategy, selectedSpread));
+    button.addEventListener("click", () =>
+      startGame(role.id, selectedStrategy, selectedSpread, selectedTowerPriority)
+    );
     UI.roleButtons.appendChild(button);
   }
 }
@@ -419,11 +432,17 @@ function selectStrategy(strategy) {
     button.setAttribute("aria-pressed", String(selected));
   }
   selectedSpread = null;
+  selectedTowerPriority = null;
   for (const button of UI.spreadButtons.querySelectorAll(".spread-button")) {
     button.classList.remove("selected");
     button.setAttribute("aria-pressed", "false");
   }
+  for (const button of UI.towerPriorityButtons.querySelectorAll(".tower-priority-button")) {
+    button.classList.remove("selected");
+    button.setAttribute("aria-pressed", "false");
+  }
   UI.spreadSelection.classList.remove("hidden");
+  UI.towerPrioritySelection.classList.add("hidden");
   UI.roleSelection.classList.add("hidden");
 }
 
@@ -435,22 +454,47 @@ function selectSpread(spread) {
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-pressed", String(selected));
   }
-  UI.strategyName.textContent = `${STRATEGIES[selectedStrategy].name} / ${SPREAD_METHODS[spread].name} · 1238 / 4567`;
+  selectedTowerPriority = null;
+  for (const button of UI.towerPriorityButtons.querySelectorAll(".tower-priority-button")) {
+    button.classList.remove("selected");
+    button.setAttribute("aria-pressed", "false");
+  }
+  UI.towerPrioritySelection.classList.remove("hidden");
+  UI.roleSelection.classList.add("hidden");
+}
+
+function selectTowerPriority(method) {
+  if (!selectedStrategy || !selectedSpread || !TOWER_SIDE_PRIORITY_METHODS[method]) return;
+  selectedTowerPriority = method;
+  for (const button of UI.towerPriorityButtons.querySelectorAll(".tower-priority-button")) {
+    const selected = button.dataset.towerPriority === method;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  }
+  UI.strategyName.textContent =
+    `${STRATEGIES[selectedStrategy].name} / ${SPREAD_METHODS[selectedSpread].name} / ` +
+    `${TOWER_SIDE_PRIORITY_METHODS[method].name} · 1238 / 4567`;
   UI.roleSelection.classList.remove("hidden");
 }
 
 function resetSelection() {
   selectedStrategy = null;
   selectedSpread = null;
+  selectedTowerPriority = null;
   UI.selectionTitle.textContent = "攻略法を選択";
   UI.strategyButtons.classList.remove("hidden");
   UI.spreadSelection.classList.add("hidden");
+  UI.towerPrioritySelection.classList.add("hidden");
   UI.roleSelection.classList.add("hidden");
   for (const button of UI.strategyButtons.querySelectorAll(".strategy-button")) {
     button.classList.remove("selected");
     button.setAttribute("aria-pressed", "false");
   }
   for (const button of UI.spreadButtons.querySelectorAll(".spread-button")) {
+    button.classList.remove("selected");
+    button.setAttribute("aria-pressed", "false");
+  }
+  for (const button of UI.towerPriorityButtons.querySelectorAll(".tower-priority-button")) {
     button.classList.remove("selected");
     button.setAttribute("aria-pressed", "false");
   }
@@ -462,9 +506,12 @@ function pairIdFor(playerId, strategy) {
   return pair?.find((id) => id !== playerId) || "—";
 }
 
-function startGame(playerId, strategy = "lean", spread = "kt") {
+function startGame(playerId, strategy = "lean", spread = "kt", towerPriority = "supportFirst") {
   const activeStrategy = STRATEGIES[strategy] ? strategy : "lean";
   const activeSpread = SPREAD_METHODS[spread] ? spread : "kt";
+  const activeTowerPriority = TOWER_SIDE_PRIORITY_METHODS[towerPriority]
+    ? towerPriority
+    : "supportFirst";
   state = {
     running: true,
     finished: false,
@@ -487,6 +534,7 @@ function startGame(playerId, strategy = "lean", spread = "kt") {
     bannerUntil: 0,
     strategy: activeStrategy,
     spread: activeSpread,
+    towerPriority: activeTowerPriority,
   };
   const player = getPlayer();
   player.x = 400;
@@ -515,15 +563,37 @@ function towerInfo(round) {
   return { round, group, odd: round % 2 === 1, time: TOWER_TIMES[round - 1] };
 }
 
+function rolePriorityTower(peers, player, priorities) {
+  const ordered = [...peers].sort((a, b) =>
+    priorities.indexOf(a.role.category) - priorities.indexOf(b.role.category)
+  );
+  return ordered.indexOf(player);
+}
+
 function markSide(player, round) {
   const info = towerInfo(round);
-  const priorities = towerSidePriorityForStrategy(state.strategy).categories;
   const peers = state.players
-    .filter((member) => member.group === info.group && markForRound(member, round) === markForRound(player, round))
-    .sort((a, b) =>
-      priorities.indexOf(a.role.category) - priorities.indexOf(b.role.category)
+    .filter((member) =>
+      member.group === info.group && markForRound(member, round) === markForRound(player, round)
     );
-  return peers.indexOf(player);
+  const method = towerSidePriority(state.towerPriority);
+  const fallback = rolePriorityTower(peers, player, method.categories);
+  if (method.mode !== "keep-previous" || peers.length !== 2 ||
+      peers.some((member) => member.lastTower === null)) {
+    return fallback;
+  }
+  if (peers[0].lastTower !== peers[1].lastTower) {
+    return player.lastTower;
+  }
+
+  const sharedTower = player.lastTower;
+  const ordered = [...peers].sort((a, b) => {
+    const distanceDifference = b.lastBossDistance - a.lastBossDistance;
+    if (Math.abs(distanceDifference) > 0.001) return distanceDifference;
+    return rolePriorityTower(peers, b, method.categories) -
+      rolePriorityTower(peers, a, method.categories);
+  });
+  return ordered[0] === player ? 1 - sharedTower : sharedTower;
 }
 
 function assignmentFor(player, round, spread = state.spread || "kt") {
@@ -532,7 +602,8 @@ function assignmentFor(player, round, spread = state.spread || "kt") {
   const mark = markForRound(player, round);
   const phase = info.odd ? "odd" : "even";
   const slots = SPREAD_METHODS[spread].active[phase][mark];
-  return slots[markSide(player, round)] || null;
+  const tower = markSide(player, round);
+  return slots.find((slot) => slot.tower === tower) || slots[0] || null;
 }
 
 function supportPosition(player, round, spread = state.spread || "kt") {
@@ -711,6 +782,8 @@ function resolveTower(round) {
     return;
   }
   for (const member of active) {
+    member.lastTower = occupied.findIndex((members) => members.includes(member));
+    member.lastBossDistance = distance(member, BOSS);
     member.stacks -= 1;
     member.lastSoaked = round;
     const next = nextRoundFor(member, round);
@@ -1294,7 +1367,7 @@ canvas.addEventListener("pointerdown", (event) => {
   };
 });
 UI.retry.addEventListener("click", () => {
-  startGame(state.playerId, state.strategy, state.spread);
+  startGame(state.playerId, state.strategy, state.spread, state.towerPriority);
 });
 
 UI.strategyButtons.addEventListener("click", (event) => {
@@ -1305,6 +1378,10 @@ UI.spreadButtons.addEventListener("click", (event) => {
   const button = event.target.closest(".spread-button");
   if (button) selectSpread(button.dataset.spread);
 });
+UI.towerPriorityButtons.addEventListener("click", (event) => {
+  const button = event.target.closest(".tower-priority-button");
+  if (button) selectTowerPriority(button.dataset.towerPriority);
+});
 setupRoleButtons();
 setupTimeline();
 resetSelection();
@@ -1312,5 +1389,6 @@ drawArena();
 if (autoplay) startGame(
   query.get("role") || "MT",
   query.get("strategy") || "lean",
-  query.get("spread") || query.get("position") || "kt"
+  query.get("spread") || query.get("position") || "kt",
+  query.get("towerPriority") || query.get("tower-priority") || "supportFirst"
 );
